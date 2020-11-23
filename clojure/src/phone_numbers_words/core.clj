@@ -25,89 +25,108 @@
           #(get char->digit (Character/toLowerCase %1))
           (filter #(Character/isLetter %1) word))))
 
-(defn- gen-substrings
+(defn gen-substrings
   "Generates all substrings for a string s, starting at index i (0 indexed)
    and going all the way to the end."
   [s i]
   (map #(subs s i (inc %1))
        (range i (count s))))
 
-(defn- only-digits [s]
+(defn only-digits [s]
   (apply str (filter #(Character/isDigit %1) s)))
-
-(defn create-translations
-  "Returns a seq of vectors for translations of a given phone number.
-   @param digits are the digits of the phone number
-   The input phone number must be only digits (i.e. filtering must be done outside
-   this function)
-   @param dict is the dictionary of phone numbers -> words,
-   generated from the dictionary file"
-  ([digits dict]
-   (create-translations digits dict 0 []))
-  ([digits dict start-idx result]
-   (if (>= start-idx (count digits))
-     result
-     ; else:
-     ; creates substrings of s[start], s[start..1], s[start..2], etc
-     ; For each substring, call Map.get, and keep it if it is non-nil
-     ; Then, foreach item in the returned vector, recursively call create-translations
-     (let [all-subs (gen-substrings digits start-idx)]
-       (keep
-        (fn [s]
-          (let [new-idx (+ start-idx (count s))]
-            (when (contains? dict s)
-              (map
-               #(create-translations digits dict new-idx (conj result %1))
-               (get dict s)))))
-        all-subs)))))
 
 (defn conj-words-to-vecs
   "Adds each word in words to each vector in v
-   @words is a vector; @v is a vector of vectors
+   @words is a vector; @v is a seq of vectors
    e.g. (conj-words-to-vecs [F G] 
                              [[H C] [H E]]) 
    -> 
-    [[H C F] [H E F] [H C G] [H E F]]
+    ([H C F] [H E F] [H C G] [H E F])
    if v is nil, returns nil"
   [words v] (when v
               (mapcat (fn [w]
                         (map #(conj %1 w) v))
                       words)))
 
-(defn create-translations-v2
-  "Returns a vector of vectors for translations of a given phone number.
-   @digits are the digits of the phone number.
-   The input phone number must be only digits.
-   @dict is the dictionary of phone numbers -> words,
-   generated from the dictionary file."
-  ([digits dict]
-   (create-translations-v2 digits dict 0))
-  ([digits dict i]
-   (if (>= i (count digits))
-     ; Reached the end, return an empty vec of vecs
-     [[]]
-     (let [all-subs (gen-substrings digits i)
-           ; translations is a seq of [len, word] pairs
-           ; of translated words that start at position i.
-           ; If there are no translations, returns ().
-           ;   e.g. Suppose digits = 56278, i = 0
-           ;   and that 562 maps to [mir, Mix] in the dict,
-           ;   and no other subsequence starting at pos 0 is in the dict,
-           ;   then translations will be ([3 mir] [3 Mix]),
-           ;   since 562 has length 3
-           translations
-           (keep (fn [s]
-                   (when-let [v (get dict s)]
-                     [(count s) v]))
-                 all-subs)]
-       ; if translations is empty, return nil
-       (when (seq translations)
-         (apply vec
-                (keep (fn [[len words]]
+(defn keepcat
+  "Returns a lazy sequence of concatenating the non-nil
+   results of (f item). The parallel of mapcat."
+  [f coll] (apply concat (keep f coll)))
+
+(defn dorunmap [f coll] (dorun (map f coll)))
+
+(defn create-translations-impl
+  "Private implementation of create-translations. See the docstring there.
+   `i` is the starting index of the recursion
+   `last-word-digit?` is a bool that describes whether the parent recursive call
+   is called based on pushing a single digit. To quote Norvig:
+   > The rules say that in addition to dictionary words, you can use a single 
+     digit in the output, but not two digits in a row. Also (and this seems 
+     silly) you can't have a digit in a place where any word could appear.
+   To handle this, I make the parent caller pass down a bool called last-word-digit?
+
+   ## Implementation:
+   Unlike Norving's solution, this solution builds up the list of translations bottom-up
+   That means, instead of building a words list down the call chain, printing at the end,
+   we instead build a seq of vectors of words that `digits` translates into.
+   Example:
+   (def dict {12: a, 3: b, 1: c, 23: d})
+   (create-translation 123 dict 0 false) -> ([b a] [d c])
+   (create-translation 123 dict 1 false) -> ([d])
+   (create-translation 123 dict 2 false) -> ([b])"
+  [digits dict i last-word-digit?]
+  (if (>= i (count digits))
+    ; Reached the end.
+    [[]]
+    (let [all-subs (gen-substrings digits i)
+          ; translations is a seq of [len, word] pairs
+          ; of translated words that start at position i.
+          ; If there are no translations, returns ().
+          ;   e.g. Suppose digits = 56278, i = 0
+          ;   and that 562 maps to [mir, Mix] in the dict,
+          ;   and no other subsequence starting at pos 0 is in the dict,
+          ;   then translations will be ([3 mir] [3 Mix]),
+          ;   since 562 has length 3
+          translations
+          (keep (fn [s]
+                  (when-let [v (get dict s)]
+                    [(count s) v]))
+                all-subs)]
+       ; If translations is non-nil, that means we found some words.
+       ; Recursively call create-translations for all translations
+       ; and apply conj-words-to-vecs on the seq. 
+       ; We get a seq of seq of vecs, of which we want to keep the non-nil elts,
+       ; and then cast it into a seq of vecs (by applying concat)
+       ; We then apply seq to it again, to ensure that if keepcat returns (),
+       ; we cast it to nil.
+      (if (seq translations)
+        (seq (keepcat (fn [[len words]]
                         (conj-words-to-vecs
                          words
-                         (create-translations-v2 digits dict (+ len i))))
-                      translations)))))))
+                         (create-translations-impl digits dict (+ len i) false)))
+                      translations))
+         ; if we did not find any words, and last word was not a digit,
+         ; try a recursive call that pushes a single digit.
+        (when-not last-word-digit?
+          (when-let [result (create-translations-impl digits dict (+ i 1) true)]
+            (-> (get digits i)
+                (str)
+                (vector)
+                (conj-words-to-vecs result))))))))
+
+(defn create-translations
+  "Returns a vector of vectors for translations of a given phone number.
+   `digits` are the digits of the phone number.
+   The input phone number must be only digits.
+   `dict` is the dictionary of phone numbers -> words,
+   generated from the dictionary file.
+   The vectors returned are in reverse order.
+
+   Example:
+   (def dict {12: a, 3: b, 1: c, 23: d})
+   (create-translation 123 dict) -> ([b a] [d c])"
+  [digits dict]
+  (create-translations-impl digits dict 0 false))
 
 (defn -main
   "hello, world!"
@@ -117,11 +136,14 @@
                (group-by word->str (line-seq rdr)))]
     (with-open
      [rdr (reader "resources/input_small.txt")]
-      (mapv
+      (dorunmap
        (fn [s]
-         (-> s
-             (only-digits)
-             (create-translations-v2 dict)))
+         (let [translations (-> s
+                                (only-digits)
+                                (create-translations dict))]
+           (dorunmap
+            #(println s ":" (reverse %1))
+            translations)))
        (line-seq rdr)))))
 
 (comment
@@ -129,59 +151,21 @@
              [rdr (reader "resources/dictionary_small.txt")]
               (group-by word->str (line-seq rdr))))
   (def input (str/split-lines (slurp "resources/input_small.txt")))
-  (create-translations "5627857" dict 0 [])
-  (defn create' [i]
-    (let [all-subs (gen-substrings "5627857" i)
-          r (create' 3)]
-      (when r (conj r "mir"))))
   (def mock-result [["H" "C"] ["H" "D"] ["H" "E"]])
   (map #(conj %1 "Z") mock-result)
-  (defn add-words-to-result
-    "Words must be a vector of strings
-     (add-words-to-result [F G] mock-result) -> 
-     [[H C F] [H D F] [H E F] [H C G] ... ]"
-    [words v] (when v
-                (mapcat (fn [w]
-                          (map #(conj %1 w) v))
-                        words)))
-  (add-words-to-result ["F" "G"] mock-result)
-  (mapcat #(add-words-to-result %1 mock-result) '(["F" "G"] ["H"]))
-  (def test-word "5627857")
-  (defn first-translations
-    "Returns a seq of [len, word] pairs, of words that start at position i.
-     e.g. (first-translations 5627857 0) -> [3, [mir, Mix]],
-     supposing that 562 maps to [mir, Mix] in the dictionary,
-     and no other subsequence starting at 0 is in the dictionary."
-    [i] (keep (fn [s]
-                (when-let [v (get dict s)]
-                  [(count s) v]))
-              (gen-substrings test-word i)))
-  (defn create-v2
-    [i]
-    (if (>= i (count test-word))
-      ; Reached the end, return an empty vec of vecs
-      [[]]
-      (let [translations (first-translations i)]
-        ; if translations is empty, return nil
-        (when (seq translations)
-          (apply vec
-                 (keep (fn [[len words-vec]]
-                         (add-words-to-result words-vec
-                                              (create-v2 (+ len i))))
-                       translations))))))
-  (create-v2 0)
-  (seq? (create-v2 5))
-  (add-words-to-result ["asd"] nil)
-  (mapv
-   (fn [s]
-     (-> s
-         (only-digits)
-         #(create-translations-v2 %1 dict)))
-   input)
-  (macroexpand
-   '(-> s
-        (only-digits)
-        (create-translations-v2 dict))))
+  (def test-word "107835")
+  (create-translations test-word dict)
+  (create-translations "07216084067" dict)
+  (seq (keep identity '()))
+  (str (get "1235" 3))
+  (->> "123"
+       (println "asd"))
+  (create-translations "4824" dict)
+  (-> \4
+      (str)
+      (vector)
+      (conj-words-to-vecs [["a" "d"]]))
+  (-main))
 
   ;; First, we generate all substrings starting at i
   ;; Then, for each substring, I check if it is in *dict*
