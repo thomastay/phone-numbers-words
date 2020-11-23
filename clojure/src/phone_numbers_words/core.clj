@@ -42,8 +42,8 @@
                              [[H C] [H E]]) 
    -> 
     ([H C F] [H E F] [H C G] [H E F])
-   if v is nil, returns nil"
-  [words v] (when v
+   if v is nil or empty, returns nil"
+  [words v] (when (seq v)
               (mapcat (fn [w]
                         (map #(conj %1 w) v))
                       words)))
@@ -52,8 +52,6 @@
   "Returns a lazy sequence of concatenating the non-nil
    results of (f item). The parallel of mapcat."
   [f coll] (apply concat (keep f coll)))
-
-(defn dorunmap [f coll] (dorun (map f coll)))
 
 (defn create-translations-impl
   "Private implementation of create-translations. See the docstring there.
@@ -88,10 +86,11 @@
           ;   then translations will be ([3 mir] [3 Mix]),
           ;   since 562 has length 3
           translations
-          (keep (fn [s]
-                  (when-let [v (get dict s)]
-                    [(count s) v]))
-                all-subs)]
+          (keep
+           (fn [s]
+             (when-let [v (dict s)]
+               [(count s) v]))
+           all-subs)]
        ; If translations is non-nil, that means we found some words.
        ; Recursively call create-translations for all translations
        ; and apply conj-words-to-vecs on the seq. 
@@ -136,15 +135,14 @@
                (group-by word->str (line-seq rdr)))]
     (with-open
      [rdr (reader "resources/input_small.txt")]
-      (dorunmap
-       (fn [s]
-         (let [translations (-> s
-                                (only-digits)
-                                (create-translations dict))]
-           (dorunmap
-            #(println s ":" (reverse %1))
-            translations)))
-       (line-seq rdr)))))
+      (doseq [s (line-seq rdr)
+              :let [translations
+                    (-> s
+                        (only-digits)
+                        (create-translations dict))]]
+        (run!
+         #(println (str s ": " (str/join " " (reverse %1))))
+         translations)))))
 
 (comment
   (def dict (with-open
@@ -165,6 +163,10 @@
       (str)
       (vector)
       (conj-words-to-vecs [["a" "d"]]))
+  (doseq [x (filter even? (range 10))]
+    (println x))
+  (def test-str '("123" "asd"))
+  (println (str/join " " test-str))
   (-main))
 
   ;; First, we generate all substrings starting at i
