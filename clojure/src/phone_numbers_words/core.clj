@@ -19,11 +19,11 @@
 (defn word->str
   "Takes a word (a string), removes all non-letters, casts it to lowercase,
    then applies the char->digit map on it. Returns a string."
-  [word]
+  [^String word]
   (apply str
          (map
-          #(get char->digit (Character/toLowerCase %1))
-          (filter #(Character/isLetter %1) word))))
+          #(get char->digit (Character/toLowerCase ^Character %1))
+          (filter #(Character/isLetter ^Character %1) word))))
 
 (defn gen-substrings
   "Generates all substrings for a string s, starting at index i (0 indexed)
@@ -32,8 +32,8 @@
   (map #(subs s i (inc %1))
        (range i (count s))))
 
-(defn only-digits [s]
-  (apply str (filter #(Character/isDigit %1) s)))
+(defn only-digits [^String s]
+  (apply str (filter #(Character/isDigit ^Character %1) s)))
 
 (defn conj-words-to-vecs
   "Adds each word in words to each vector in v
@@ -58,7 +58,7 @@
    `i` is the starting index of the recursion
    `last-word-digit?` is a bool that describes whether the parent recursive call
    is called based on pushing a single digit. To quote Norvig:
-   > The rules say that in addition to dictionary words, you can use a single 
+     The rules say that in addition to dictionary words, you can use a single 
      digit in the output, but not two digits in a row. Also (and this seems 
      silly) you can't have a digit in a place where any word could appear.
    To handle this, I make the parent caller pass down a bool called last-word-digit?
@@ -127,14 +127,13 @@
   [digits dict]
   (create-translations-impl digits dict 0 false))
 
-(defn -main
-  "hello, world!"
-  [& _args]
+(defn print-translations
+  [dict-filename input-filename]
   (let [dict (with-open
-              [rdr (reader "resources/dictionary_small.txt")]
+              [rdr (reader dict-filename)]
                (group-by word->str (line-seq rdr)))]
     (with-open
-     [rdr (reader "resources/input_small.txt")]
+     [rdr (reader input-filename)]
       (doseq [s (line-seq rdr)
               :let [translations
                     (-> s
@@ -143,6 +142,11 @@
         (run!
          #(println (str s ": " (str/join " " (reverse %1))))
          translations)))))
+
+(defn -main
+  "Expects two args, namely the dict and the input filename"
+  [& args]
+  (print-translations (first args) (second args)))
 
 (comment
   (def dict (with-open
