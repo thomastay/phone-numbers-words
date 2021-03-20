@@ -6,6 +6,7 @@ const fs = std.fs;
 const mem = std.mem;
 const Dir = std.fs.Dir;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const StringHashMap = std.StringHashMap;
 const ascii = std.ascii;
 const ArrayList = std.ArrayList;
@@ -102,12 +103,17 @@ fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator) !?[]u8 {
     return result;
 }
 
-fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !StringHashMap(ArrayList([]const u8)) {
-    var words = StringHashMap(ArrayList([]const u8)).init(ally);
+const WordsDictionary = StringHashMap(ArrayList([]const u8));
+
+/// Reads a dictionary from the given Reader
+/// Returns a hashmap from str -> ArrayList
+fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
+    var words = WordsDictionary.init(ally);
     var wordToStrBuf: [MAX_DICT_WORD_SIZE]u8 = undefined;
     while (try readUntilEolOrEofAlloc(rdr, ally)) |dictWord| {
-        std.debug.print("{s}: {s}\n", .{ wordToString(dictWord, &wordToStrBuf), dictWord });
         const digits = wordToString(dictWord, &wordToStrBuf);
+        std.debug.print("{s}: {s}\n", .{ digits, dictWord });
+
         const ret = try words.getOrPut(digits);
         if (ret.found_existing) {
             try ret.entry.value.append(dictWord);
@@ -120,6 +126,59 @@ fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !StringHashMap(ArrayLis
     }
     return words;
 }
+const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
+
+const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
+
+fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *BufWriter, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
+    // std.debug.print("Start: {d}\n", .{start});
+    if (start >= digits.len) {
+        // Base case, print everything inside of wordList and end recursion
+        // std.debug.print("At the end!\n Found wordList {s}\n", .{wordList.items});
+        try out.writer().print("{s}: ", .{number});
+        for (wordList.items) |word| {
+            try out.writer().print("{s} ", .{word});
+        }
+        try out.writer().print("\n", .{});
+    } else {
+        var foundWord = false;
+        var keyBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
+        var i: usize = 0;
+        while (i < digits.len - start) : (i += 1) {
+            const startIdxDigits = i + start;
+            keyBuf[i] = digits[startIdxDigits];
+            const key = keyBuf[0 .. i + 1];
+            const v = words.get(key);
+            // std.debug.print("{s}, {any}\n", .{ key, v });
+            if (v) |wordsMappedToDigit| {
+                foundWord = true;
+                for (wordsMappedToDigit.items) |word| {
+                    try wordList.append(word);
+                    try printTranslationImpl(wordList, startIdxDigits + 1, out, ally, number, digits, words);
+                    _ = wordList.pop();
+                }
+            }
+        }
+        if (!foundWord and (wordList.items.len == 0 or wordList.items[wordList.items.len - 1].len != 1)) {
+            // handle the edge case
+            var singleDigit = try ally.create([1]u8);
+            singleDigit[0] = digits[start];
+            try wordList.append(singleDigit);
+            try printTranslationImpl(wordList, start + 1, out, ally, number, digits, words);
+            _ = wordList.pop();
+        }
+    }
+}
+
+// Note: is there no good way to abstract over writers?
+fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) !void {
+    var arena = ArenaAllocator.init(ally);
+    defer arena.deinit();
+    var wordList = try ArrayList([]const u8).initCapacity(&arena.allocator, digits.len);
+    var out = std.io.bufferedWriter(std.io.getStdOut().writer());
+    try printTranslationImpl(&wordList, 0, &out, &arena.allocator, number, digits, words);
+    try out.flush();
+}
 
 pub fn main() !void {
     // Allocator setup
@@ -130,7 +189,7 @@ pub fn main() !void {
     // To simplify things, we use an arena to allocate memory and free it in one go.
     var dictArena = std.heap.ArenaAllocator.init(gpaAlly);
     defer dictArena.deinit();
-    const words = blk: {
+    const words: WordsDictionary = blk: {
         // read in the hash table from dictionary file
         // NOTE: this absolute path hackery is to get over relative paths on windows error
         // will change soon
@@ -141,8 +200,12 @@ pub fn main() !void {
         var dictFile = try Dir.openFile(fs.cwd(), "dictionary_small.txt", .{});
         defer dictFile.close();
         var dictReader = fs.File.reader(dictFile);
-        break :blk readDictionary(&dictArena.allocator, dictReader);
+        break :blk try readDictionary(&dictArena.allocator, dictReader);
     };
+    std.debug.print("----------------------\n", .{});
+    var phoneNumberDigitsBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
+    const num = "10/783--5";
+    try printTranslation(gpaAlly, num, onlyDigits(num, &phoneNumberDigitsBuf), words);
 }
 
 test "only Digits tests" {
