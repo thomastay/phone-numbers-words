@@ -56,7 +56,7 @@ fn createDigitMap() [26]u8 {
 /// Returns a slice of output buffer.
 /// Does not modify the original word
 // Note: from the error messages alone, it was hard to figure out what `word` should be
-fn wordToString(word: []const u8, output: []u8) []u8 {
+fn wordToNumber(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
 
     // i points to word, j points to output
@@ -103,6 +103,22 @@ fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator) !?[]u8 {
     return result;
 }
 
+fn readUntilEolOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
+    const result = try fs.File.Reader.readUntilDelimiterOrEof(self, buf, '\r');
+    if (result == null) return null;
+    // discard the \n if it exists
+    const lf = self.readByte() catch |err| {
+        switch (err) {
+            error.EndOfStream => return result,
+            else => return err,
+        }
+    };
+    if (lf != '\n') {
+        std.debug.panic("{} should have been \n", .{lf});
+    }
+    return result;
+}
+
 const WordsDictionary = StringHashMap(ArrayList([]const u8));
 
 /// Reads a dictionary from the given Reader
@@ -111,8 +127,8 @@ fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
     var words = WordsDictionary.init(ally);
     var wordToStrBuf: [MAX_DICT_WORD_SIZE]u8 = undefined;
     while (try readUntilEolOrEofAlloc(rdr, ally)) |dictWord| {
-        const digits = wordToString(dictWord, &wordToStrBuf);
-        std.debug.print("{s}: {s}\n", .{ digits, dictWord });
+        const digits = wordToNumber(dictWord, &wordToStrBuf);
+        // std.debug.print("{s}: {s}\n", .{ digits, dictWord });
 
         const ret = try words.getOrPut(digits);
         if (ret.found_existing) {
@@ -126,15 +142,17 @@ fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
     }
     return words;
 }
+// Can I not hardcode this number? Should this number be exported by std.io?
 const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
 
+// Note: can I merge error unions?
 const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
 
+// Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness.
+// Note: is there no good way to abstract over writers?
 fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *BufWriter, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
-    // std.debug.print("Start: {d}\n", .{start});
     if (start >= digits.len) {
         // Base case, print everything inside of wordList and end recursion
-        // std.debug.print("At the end!\n Found wordList {s}\n", .{wordList.items});
         try out.writer().print("{s}: ", .{number});
         for (wordList.items) |word| {
             try out.writer().print("{s} ", .{word});
@@ -149,7 +167,6 @@ fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *Bu
             keyBuf[i] = digits[startIdxDigits];
             const key = keyBuf[0 .. i + 1];
             const v = words.get(key);
-            // std.debug.print("{s}, {any}\n", .{ key, v });
             if (v) |wordsMappedToDigit| {
                 foundWord = true;
                 for (wordsMappedToDigit.items) |word| {
@@ -170,7 +187,6 @@ fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *Bu
     }
 }
 
-// Note: is there no good way to abstract over writers?
 fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) !void {
     var arena = ArenaAllocator.init(ally);
     defer arena.deinit();
@@ -186,6 +202,17 @@ pub fn main() !void {
     var gpaAlly = &gpa.allocator;
     defer std.debug.assert(!gpa.deinit()); // no leaks
 
+    // Read the input filename and dictionary filename
+    const argv = try std.process.argsAlloc(gpaAlly);
+    defer std.process.argsFree(gpaAlly, argv);
+    if (argv.len != 3) {
+        try std.io.getStdOut().writer().print("Usage: ./phone_number_words <dict filename> <input filename>", .{});
+        return;
+    }
+    const dictFilename = argv[1];
+    const inputFilename = argv[2];
+    // std.debug.print("dict filename: {s}, input filename: {s}", .{ argv[1], argv[2] });
+
     // To simplify things, we use an arena to allocate memory and free it in one go.
     var dictArena = std.heap.ArenaAllocator.init(gpaAlly);
     defer dictArena.deinit();
@@ -197,15 +224,20 @@ pub fn main() !void {
         // var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         // const dictFilename = try Dir.realpath(fs.cwd(), "dictionary_small.txt", &buf);
         // std.debug.print("{s}", .{dictFilename});
-        var dictFile = try Dir.openFile(fs.cwd(), "dictionary_small.txt", .{});
+        var dictFile = try Dir.openFile(fs.cwd(), dictFilename, .{});
         defer dictFile.close();
         var dictReader = fs.File.reader(dictFile);
         break :blk try readDictionary(&dictArena.allocator, dictReader);
     };
-    std.debug.print("----------------------\n", .{});
+    // Handle the Input file
+    var inputFile = try Dir.openFile(fs.cwd(), inputFilename, .{});
+    defer inputFile.close();
+    var inputReader = fs.File.reader(inputFile);
+    var phoneNumberBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
     var phoneNumberDigitsBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
-    const num = "10/783--5";
-    try printTranslation(gpaAlly, num, onlyDigits(num, &phoneNumberDigitsBuf), words);
+    while (try readUntilEolOrEof(inputReader, &phoneNumberBuf)) |num| {
+        try printTranslation(gpaAlly, num, onlyDigits(num, &phoneNumberDigitsBuf), words);
+    }
 }
 
 test "only Digits tests" {
