@@ -23,6 +23,8 @@ const charToDigit: [26]u8 = createDigitMap();
 const WordsDictionary = StringHashMap(ArrayList([]const u8));
 // Can I not hardcode this number? Should this number be exported by std.io?
 const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
+// Note: can I merge error unions? Would like to write this inline in the function...
+const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
 
 pub fn main() !void {
     // Allocator setup
@@ -39,25 +41,16 @@ pub fn main() !void {
     }
     const dictFilename = argv[1];
     const inputFilename = argv[2];
-    // std.debug.print("dict filename: {s}, input filename: {s}", .{ argv[1], argv[2] });
 
-    // To simplify things, we use an arena to allocate memory and free it in one go.
     var dictArena = std.heap.ArenaAllocator.init(gpaAlly);
     defer dictArena.deinit();
     const words: WordsDictionary = blk: {
-        // read in the hash table from dictionary file
-        // NOTE: this absolute path hackery is to get over relative paths on windows error
-        // will change soon
-        // NOTE: I gave up on the relative path bs, it just works by copying it in, lol.
-        // var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        // const dictFilename = try Dir.realpath(fs.cwd(), "dictionary_small.txt", &buf);
-        // std.debug.print("{s}", .{dictFilename});
         var dictFile = try Dir.openFile(fs.cwd(), dictFilename, .{});
         defer dictFile.close();
         var dictReader = fs.File.reader(dictFile);
         break :blk try readDictionary(&dictArena.allocator, dictReader);
     };
-    // Handle the Input file
+
     var inputFile = try Dir.openFile(fs.cwd(), inputFilename, .{});
     defer inputFile.close();
     var inputReader = fs.File.reader(inputFile);
@@ -98,9 +91,6 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
     try printTranslationImpl(&wordList, 0, &out, &arena.allocator, number, digits, words);
     try out.flush();
 }
-
-// Note: can I merge error unions?
-const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
 
 // Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness.
 // Note: is there no good way to abstract over writers?
