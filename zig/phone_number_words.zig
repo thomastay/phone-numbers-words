@@ -32,7 +32,6 @@ pub fn main() !void {
     var gpaAlly = &gpa.allocator;
     defer std.debug.assert(!gpa.deinit()); // no leaks
 
-    // Read the input filename and dictionary filename
     const argv = try std.process.argsAlloc(gpaAlly);
     defer std.process.argsFree(gpaAlly, argv);
     if (argv.len != 3) {
@@ -68,7 +67,6 @@ fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
     var wordToStrBuf: [MAX_DICT_WORD_SIZE]u8 = undefined;
     while (try readUntilEolOrEofAlloc(rdr, ally, MAX_DICT_WORD_SIZE)) |dictWord| {
         const digits = wordToNumber(dictWord, &wordToStrBuf);
-        // std.debug.print("{s}: {s}\n", .{ digits, dictWord });
 
         const ret = try words.getOrPut(digits);
         if (ret.found_existing) {
