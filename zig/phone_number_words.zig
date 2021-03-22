@@ -1,6 +1,7 @@
 /// A Zig translation of https://norvig.com/java-lisp.html
 // Qn: it is really easy to make a typo here! Why can't we just say import {mem, Allocator} from std?
 const std = @import("std");
+const builtin = @import("builtin");
 const expectEqualStrings = std.testing.expectEqualStrings;
 const fs = std.fs;
 const mem = std.mem;
@@ -88,7 +89,15 @@ fn onlyDigits(word: []const u8, output: []u8) []u8 {
 }
 
 fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator) !?[]u8 {
-    const result = try fs.File.Reader.readUntilDelimiterOrEofAlloc(self, allocator, '\r', MAX_DICT_WORD_SIZE);
+    if (builtin.os.tag == builtin.Os.Tag.windows) {
+        return readUntilCRLFOrEofAlloc(self, allocator);
+    } else {
+        return self.readUntilDelimiterOrEofAlloc(allocator, '\n', MAX_DICT_WORD_SIZE);
+    }
+}
+
+fn readUntilCRLFOrEofAlloc(self: fs.File.Reader, allocator: *Allocator) !?[]u8 {
+    const result = try self.readUntilDelimiterOrEofAlloc(allocator, '\r', MAX_DICT_WORD_SIZE);
     if (result == null) return null;
     // discard the \n if it exists
     const lf = self.readByte() catch |err| {
@@ -104,7 +113,15 @@ fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator) !?[]u8 {
 }
 
 fn readUntilEolOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
-    const result = try fs.File.Reader.readUntilDelimiterOrEof(self, buf, '\r');
+    if (builtin.os.tag == builtin.Os.Tag.windows) {
+        return readUntilCRLFOrEof(self, buf);
+    } else {
+        return self.readUntilDelimiterOrEof(buf, '\n');
+    }
+}
+
+fn readUntilCRLFOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
+    const result = try self.readUntilDelimiterOrEof(buf, '\r');
     if (result == null) return null;
     // discard the \n if it exists
     const lf = self.readByte() catch |err| {
