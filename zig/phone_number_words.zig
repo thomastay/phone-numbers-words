@@ -4,12 +4,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const expectEqualStrings = std.testing.expectEqualStrings;
 const fs = std.fs;
-const mem = std.mem;
-const Dir = std.fs.Dir;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const StringHashMap = std.StringHashMap;
-const ascii = std.ascii;
 const ArrayList = std.ArrayList;
 
 // constants specified in test-instructions.txt
@@ -44,13 +41,13 @@ pub fn main() !void {
     var dictArena = std.heap.ArenaAllocator.init(gpaAlly);
     defer dictArena.deinit();
     const words: WordsDictionary = blk: {
-        var dictFile = try Dir.openFile(fs.cwd(), dictFilename, .{});
+        var dictFile = try fs.Dir.openFile(fs.cwd(), dictFilename, .{});
         defer dictFile.close();
         var dictReader = fs.File.reader(dictFile);
         break :blk try readDictionary(&dictArena.allocator, dictReader);
     };
 
-    var inputFile = try Dir.openFile(fs.cwd(), inputFilename, .{});
+    var inputFile = try fs.Dir.openFile(fs.cwd(), inputFilename, .{});
     defer inputFile.close();
     var inputReader = fs.File.reader(inputFile);
     var phoneNumberBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
@@ -165,7 +162,6 @@ fn createDigitMap() [26]u8 {
 
 /// Takes as input a word that contains digits and non digits, and an output buffer
 /// Returns a slice of output buffer.
-/// Does not modify the original word
 // Note: from the error messages alone, it was hard to figure out what `word` should be
 fn wordToNumber(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
@@ -173,8 +169,8 @@ fn wordToNumber(word: []const u8, output: []u8) []u8 {
     // i points to word, j points to output
     var j: usize = 0;
     for (word) |c, i| {
-        if (ascii.isAlpha(c)) {
-            output[j] = charToDigit[ascii.toLower(c) - 'a'];
+        if (std.ascii.isAlpha(c)) {
+            output[j] = charToDigit[std.ascii.toLower(c) - 'a'];
             j += 1;
         }
     }
@@ -183,14 +179,13 @@ fn wordToNumber(word: []const u8, output: []u8) []u8 {
 
 /// Takes as input a word that contains digits and non digits, and an output buffer
 /// Returns a slice of output buffer.
-/// Does not modify the original word
 fn onlyDigits(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
 
     // i points to word, j points to output
     var j: usize = 0;
     for (word) |c, i| {
-        if (ascii.isDigit(c)) {
+        if (std.ascii.isDigit(c)) {
             output[j] = c;
             j += 1;
         }
