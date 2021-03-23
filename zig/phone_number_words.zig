@@ -1,5 +1,24 @@
 /// A Zig translation of https://norvig.com/java-lisp.html
-// Qn: it is really easy to make a typo here! Why can't we just say import {mem, Allocator} from std?
+/// This is a fun little exercise that I use when learning a new language.
+/// I've done this previous excursion in Nim and Clojure and Python (links below)
+/// The gist of this problem is as such: Given some mapping of letters to digits,
+/// we want to "translate" a phone number into a series of words that encode the phone number
+/// The words will be given to us via some dictionary.
+///
+/// For instance, given the mapping below, and a dictionary of words:
+/// MAPPING:
+///       E | J N Q | R W X | D S Y | F T | A M | C I V | B K U | L O P | G H Z
+///       e | j n q | r w x | d s y | f t | a m | c i v | b k u | l o p | g h z
+///       0 |   1   |   2   |   3   |  4  |  5  |   6   |   7   |   8   |   9
+/// DICT: {hell, hello, o, world, row, oy}
+/// we might encode the number 9088828283 in 4 different ways:
+///    1. hello world
+///    2. hell o world
+///    3. hello row oy
+///    4. hell o row oy
+///
+// Note: it is really easy to make a typo here! Why can't we just say import {mem, Allocator} from std?
+// Note: Right now, the perf bottleneck on linux appears to be the reading of the input dictionary...
 const std = @import("std");
 const builtin = @import("builtin");
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -18,14 +37,16 @@ const MAX_PHONE_NUMBER_SIZE = 50;
 /// it maps a lowercase a-z character to a digit in 0-9.
 const charToDigit: [26]u8 = createDigitMap();
 const WordsDictionary = StringHashMap(ArrayList([]const u8));
-// Can I not hardcode this number? Should this number be exported by std.io?
+// Note: Can I not hardcode this number? Should this number be exported by std.io?
 const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
 // Note: can I merge error unions? Would like to write this inline in the function...
 const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
 
 pub fn main() !void {
     // Allocator setup
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // why the {}?
+    // Note: GPA is great for debugging, works like it says on the tin and catches all leaks
+    // but how do I swap it out at build time, based on the build config?
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // Note: why the {}? I learnt this through copy-paste
     var gpaAlly = &gpa.allocator;
     defer std.debug.assert(!gpa.deinit()); // no leaks
 
@@ -84,7 +105,7 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
     var wordList = try ArrayList([]const u8).initCapacity(&arena.allocator, digits.len);
     var out = std.io.bufferedWriter(std.io.getStdOut().writer());
     try printTranslationImpl(&wordList, 0, &out, &arena.allocator, number, digits, words);
-    try out.flush();
+    try out.flush(); // Note: why is this needed? Should I flush later? When do I flush?
 }
 
 // Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness.
@@ -163,6 +184,7 @@ fn createDigitMap() [26]u8 {
 /// Takes as input a word that contains digits and non digits, and an output buffer
 /// Returns a slice of output buffer.
 // Note: from the error messages alone, it was hard to figure out what `word` should be
+// Note: is it a good idea to modify the input slice?
 fn wordToNumber(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
 
