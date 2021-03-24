@@ -20,6 +20,7 @@
 ///
 // Note: it is really easy to make a typo here! Why can't we just say import {mem, Allocator} from std?
 // Note: Right now, the perf bottleneck on linux appears to be the reading of the input dictionary...
+// Note: does Zig have bigints? That might speed it up.
 const std = @import("std");
 const builtin = @import("builtin");
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -45,7 +46,7 @@ const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpace
 
 pub fn main() !void {
     // Allocator setup
-    // Note: GPA is great for debugging, works like it says on the tin and catches all leaks
+    // Note: GPA is great for debugging, works like it says on the tin and catches all leaks.
     // but how do I swap it out at build time, based on the build config?
     var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // Note: why the {}? I learnt this through copy-paste
     var gpaAlly = &gpa.allocator;
@@ -60,6 +61,7 @@ pub fn main() !void {
     const dictFilename = argv[1];
     const inputFilename = argv[2];
 
+    // Read the dictionary from a file.
     var dictArena = std.heap.ArenaAllocator.init(gpaAlly);
     defer dictArena.deinit();
     const words: WordsDictionary = blk: {
@@ -69,6 +71,7 @@ pub fn main() !void {
         break :blk try readDictionary(&dictArena.allocator, dictReader);
     };
 
+    // Read the phone numbers from a file, and print the translations.
     var inputFile = try fs.Dir.openFile(fs.cwd(), inputFilename, .{});
     defer inputFile.close();
     var inputReader = fs.File.reader(inputFile);
@@ -92,7 +95,7 @@ fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
             try ret.entry.value.append(dictWord);
         } else {
             var vec = try ArrayList([]const u8).initCapacity(ally, 1);
-            try vec.append(dictWord);
+            try vec.append(dictWord); // Note: can I declare this inline with the previous line?
             ret.entry.key = try ally.dupe(u8, digits);
             ret.entry.value = vec;
         }
@@ -110,11 +113,11 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
     var out = std.io.bufferedWriter(std.io.getStdOut().writer());
     try printTranslationImpl(&wordList, 0, &out, &arena.allocator, number, digits, words);
     try out.flush(); // Note: why is this needed? Should I flush later? When do I flush?
+    // also, is it possible to flush on defer? Currently, I cannot do it, since it contains a try.
 }
 
 // Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness.
 // Note: is there no good way to abstract over writers?
-
 /// This function prints the encodings of the phone numbers recursively
 /// Here is an example input
 /// ```zig
@@ -127,6 +130,9 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
 /// To recursively generate the rest of the numbers, we perform a DFS, slicing from the start index
 /// onwards. Once we reach the end of the word, we print out the wordlist.
 /// After the function returns, we pop the wordList to restore the stack back to its original position.
+/// Unfortunately, we have an edge case specified in the test instructions, whereby if no word matches at a given
+/// position, we are allowed to use a single digit (and no more!) in its place.
+/// The if-branch after the while statement handles this edge case.
 fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *BufWriter, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
     if (start >= digits.len) {
         // Base case, print everything inside of wordList and end recursion
@@ -153,9 +159,8 @@ fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *Bu
             }
         }
         if (!foundWord and (wordList.items.len == 0 or wordList.items[wordList.items.len - 1].len != 1)) {
-            // handle the edge case
             var singleDigit = try ally.create([1]u8);
-            singleDigit[0] = digits[start];
+            singleDigit[0] = digits[start]; // note: can I declare this inline?
             try wordList.append(singleDigit);
             try printTranslationImpl(wordList, start + 1, out, ally, number, digits, words);
             _ = wordList.pop();
@@ -201,7 +206,8 @@ fn createDigitMap() [26]u8 {
 // Note: from the error messages alone, it was hard to figure out what `word` should be
 // Note: is it a good idea to modify the input slice?
 /// Takes as input a word that contains digits and non digits, and an output buffer
-/// Returns a slice of output buffer.
+/// Returns a slice of output buffer containing the mapped digits
+/// according to the test instructions.
 fn wordToNumber(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
 
@@ -217,7 +223,7 @@ fn wordToNumber(word: []const u8, output: []u8) []u8 {
 }
 
 /// Takes as input a word that contains digits and non digits, and an output buffer
-/// Returns a slice of output buffer.
+/// Returns a slice of output buffer containing only digits 0-9.
 fn onlyDigits(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
 
