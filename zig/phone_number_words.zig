@@ -253,10 +253,14 @@ fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size:
 fn readUntilCRLFOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size: usize) !?[]u8 {
     const result = try self.readUntilDelimiterOrEofAlloc(allocator, '\r', max_size);
     if (result == null) return null;
+    errdefer allocator.free(result);
+    // Note: The above took me a while of code review to realize was necessary, since any errors
+    // never occured in testing.
+
     // discard the \n if it exists
     const lf = self.readByte() catch |err| {
         switch (err) {
-            error.EndOfStream => return result,
+            error.EndOfStream => return result, // could theoretically happen, but practically never happens.
             else => return err,
         }
     };
