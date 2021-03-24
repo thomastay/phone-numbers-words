@@ -1,9 +1,10 @@
 /// A Zig translation of https://norvig.com/java-lisp.html
 /// This is a fun little exercise that I use when learning a new language.
-/// I've done this previous excursion in Nim and Clojure and Python (links below)
+/// I've done this previous excursion in Nim and Clojure and Python (https://github.com/thomastay/phone-numbers-words)
 /// The gist of this problem is as such: Given some mapping of letters to digits,
 /// we want to "translate" a phone number into a series of words that encode the phone number
 /// The words will be given to us via some dictionary.
+/// The full instructions are here: https://github.com/thomastay/phone-numbers-words/blob/master/resources/test_instructions.txt
 ///
 /// For instance, given the mapping below, and a dictionary of words:
 /// MAPPING:
@@ -11,7 +12,7 @@
 ///       e | j n q | r w x | d s y | f t | a m | c i v | b k u | l o p | g h z
 ///       0 |   1   |   2   |   3   |  4  |  5  |   6   |   7   |   8   |   9
 /// DICT: {hell, hello, o, world, row, oy}
-/// we might encode the number 9088828283 in 4 different ways:
+/// we might encode the number 908-882-8283 in 4 different ways:
 ///    1. hello world
 ///    2. hell o world
 ///    3. hello row oy
@@ -99,6 +100,9 @@ fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
     return words;
 }
 
+/// For a given phone number and a the digits of the phone number
+/// prints the phone number and all combinations of words that might encode the phone number
+/// It sets up some allocators and variables, then calls printTranslationImpl, which is a recursive function.
 fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) !void {
     var arena = ArenaAllocator.init(ally);
     defer arena.deinit();
@@ -110,6 +114,19 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
 
 // Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness.
 // Note: is there no good way to abstract over writers?
+
+/// This function prints the encodings of the phone numbers recursively
+/// Here is an example input
+/// ```zig
+///   number:   908-882-8283
+///   digits:   9088828283
+///   start: 4      ^
+/// //      start points here!
+///   wordList: ["hell"]     // <-- 9088 maps to 'hell'
+/// ```
+/// To recursively generate the rest of the numbers, we perform a DFS, slicing from the start index
+/// onwards. Once we reach the end of the word, we print out the wordlist.
+/// After the function returns, we pop the wordList to restore the stack back to its original position.
 fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *BufWriter, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
     if (start >= digits.len) {
         // Base case, print everything inside of wordList and end recursion
@@ -181,10 +198,10 @@ fn createDigitMap() [26]u8 {
     return result;
 }
 
-/// Takes as input a word that contains digits and non digits, and an output buffer
-/// Returns a slice of output buffer.
 // Note: from the error messages alone, it was hard to figure out what `word` should be
 // Note: is it a good idea to modify the input slice?
+/// Takes as input a word that contains digits and non digits, and an output buffer
+/// Returns a slice of output buffer.
 fn wordToNumber(word: []const u8, output: []u8) []u8 {
     std.debug.assert(word.len <= output.len); // output must have enough space
 
@@ -218,7 +235,7 @@ fn onlyDigits(word: []const u8, output: []u8) []u8 {
 // ------------------------------- HELPER FUNCTIONS -------------------------------------
 // --------------------------------------------------------------------------------------
 
-/// These functions are to handle the inability of the stdlib to handle CRLF line endings
+// These functions are to handle the inability of the stdlib to handle CRLF line endings
 fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size: usize) !?[]u8 {
     if (builtin.os.tag == builtin.Os.Tag.windows) {
         return readUntilCRLFOrEofAlloc(self, allocator, max_size);
@@ -243,7 +260,7 @@ fn readUntilCRLFOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size
     return result;
 }
 
-/// These functions are to handle the inability of the stdlib to handle CRLF line endings
+// These functions are to handle the inability of the stdlib to handle CRLF line endings
 fn readUntilEolOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
     if (builtin.os.tag == builtin.Os.Tag.windows) {
         return readUntilCRLFOrEof(self, buf);
