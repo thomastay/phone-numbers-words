@@ -39,8 +39,6 @@ const MAX_PHONE_NUMBER_SIZE = 50;
 /// it maps a lowercase a-z character to a digit in 0-9.
 const charToDigit: [26]u8 = createDigitMap();
 const WordsDictionary = StringHashMap(ArrayList([]const u8));
-// Note: Can I not hardcode this number? Should this number be exported by std.io?
-const BufWriter = std.io.BufferedWriter(4096, fs.File.Writer);
 // Note: can I merge error unions? Would like to write this inline in the function...
 const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
 
@@ -67,24 +65,24 @@ pub fn main() !void {
     const words: WordsDictionary = blk: {
         var dictFile = try fs.Dir.openFile(fs.cwd(), dictFilename, .{});
         defer dictFile.close();
-        var dictReader = fs.File.reader(dictFile);
-        break :blk try readDictionary(&dictArena.allocator, dictReader);
+        var dictReader = std.io.bufferedReader(fs.File.reader(dictFile)).reader();
+        break :blk try readDictionary(&dictArena.allocator, &dictReader);
     };
 
     // Read the phone numbers from a file, and print the translations.
     var inputFile = try fs.Dir.openFile(fs.cwd(), inputFilename, .{});
     defer inputFile.close();
-    var inputReader = fs.File.reader(inputFile);
+    var inputReader = std.io.bufferedReader(fs.File.reader(inputFile)).reader();
     var phoneNumberBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
     var phoneNumberDigitsBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
-    while (try readUntilEolOrEof(inputReader, &phoneNumberBuf)) |num| {
+    while (try readUntilEolOrEof(&inputReader, &phoneNumberBuf)) |num| {
         try printTranslation(gpaAlly, num, onlyDigits(num, &phoneNumberDigitsBuf), words);
     }
 }
 
-/// Reads a dictionary from the given Reader
+/// Reads a dictionary from the given Reader (declared anytype to be generic)
 /// Returns a hashmap from str -> ArrayList
-fn readDictionary(ally: *Allocator, rdr: fs.File.Reader) !WordsDictionary {
+fn readDictionary(ally: *Allocator, rdr: anytype) !WordsDictionary {
     var words = WordsDictionary.init(ally);
     var wordToStrBuf: [MAX_DICT_WORD_SIZE]u8 = undefined;
     while (try readUntilEolOrEofAlloc(rdr, ally, MAX_DICT_WORD_SIZE)) |dictWord| {
@@ -110,9 +108,9 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
     var arena = ArenaAllocator.init(ally);
     defer arena.deinit();
     var wordList = try ArrayList([]const u8).initCapacity(&arena.allocator, digits.len);
-    var out = std.io.bufferedWriter(std.io.getStdOut().writer());
-    try printTranslationImpl(&wordList, 0, &out, &arena.allocator, number, digits, words);
-    try out.flush(); // Note: why is this needed? Should I flush later? When do I flush?
+    var bufWriter = std.io.bufferedWriter(std.io.getStdOut().writer());
+    try printTranslationImpl(&wordList, 0, &bufWriter.writer(), &arena.allocator, number, digits, words);
+    try bufWriter.flush(); // Note: why is this needed? Should I flush later? When do I flush?
     // also, is it possible to flush on defer? Currently, I cannot do it, since it contains a try.
 }
 
@@ -133,14 +131,14 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
 /// Unfortunately, we have an edge case specified in the test instructions, whereby if no word matches at a given
 /// position, we are allowed to use a single digit (and no more!) in its place.
 /// The if-branch after the while statement handles this edge case.
-fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: *BufWriter, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
+fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: anytype, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
     if (start >= digits.len) {
         // Base case, print everything inside of wordList and end recursion
-        try out.writer().print("{s}: ", .{number});
+        try out.print("{s}: ", .{number});
         for (wordList.items) |word| {
-            try out.writer().print("{s} ", .{word});
+            try out.print("{s} ", .{word});
         }
-        try out.writer().print("\n", .{});
+        try out.print("\n", .{});
     } else {
         var foundWord = false;
         var keyBuf: [MAX_PHONE_NUMBER_SIZE]u8 = undefined;
@@ -242,7 +240,7 @@ fn onlyDigits(word: []const u8, output: []u8) []u8 {
 // --------------------------------------------------------------------------------------
 
 // These functions are to handle the inability of the stdlib to handle CRLF line endings
-fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size: usize) !?[]u8 {
+fn readUntilEolOrEofAlloc(self: anytype, allocator: *Allocator, max_size: usize) !?[]u8 {
     if (builtin.os.tag == builtin.Os.Tag.windows) {
         return readUntilCRLFOrEofAlloc(self, allocator, max_size);
     } else {
@@ -250,28 +248,32 @@ fn readUntilEolOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size:
     }
 }
 
-fn readUntilCRLFOrEofAlloc(self: fs.File.Reader, allocator: *Allocator, max_size: usize) !?[]u8 {
-    const result = try self.readUntilDelimiterOrEofAlloc(allocator, '\r', max_size);
-    if (result == null) return null;
-    errdefer allocator.free(result);
-    // Note: The above took me a while of code review to realize was necessary, since any errors
-    // never occured in testing.
+fn readUntilCRLFOrEofAlloc(self: anytype, allocator: *Allocator, max_size: usize) !?[]u8 {
+    const result_ = try self.readUntilDelimiterOrEofAlloc(allocator, '\r', max_size);
+    if (result_) |result| {
+        errdefer allocator.free(result);
+        // Note: The above took me a while of code review to realize was necessary, since any errors
+        // never occured in testing.
 
-    // discard the \n if it exists
-    const lf = self.readByte() catch |err| {
-        switch (err) {
-            error.EndOfStream => return result, // could theoretically happen, but practically never happens.
-            else => return err,
+        // discard the \n if it exists
+        const lf = self.readByte() catch |err| {
+            switch (err) {
+                error.EndOfStream => return result, // could theoretically happen, but practically never happens.
+                else => return err,
+            }
+        };
+        if (lf != '\n') {
+            std.debug.panic("{} should have been \n", .{lf});
         }
-    };
-    if (lf != '\n') {
-        std.debug.panic("{} should have been \n", .{lf});
+        return result;
+    } else {
+        // end of stream
+        return null;
     }
-    return result;
 }
 
 // These functions are to handle the inability of the stdlib to handle CRLF line endings
-fn readUntilEolOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
+fn readUntilEolOrEof(self: anytype, buf: []u8) !?[]u8 {
     if (builtin.os.tag == builtin.Os.Tag.windows) {
         return readUntilCRLFOrEof(self, buf);
     } else {
@@ -279,7 +281,7 @@ fn readUntilEolOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
     }
 }
 
-fn readUntilCRLFOrEof(self: fs.File.Reader, buf: []u8) !?[]u8 {
+fn readUntilCRLFOrEof(self: anytype, buf: []u8) !?[]u8 {
     const result = try self.readUntilDelimiterOrEof(buf, '\r');
     if (result == null) return null;
     // discard the \n if it exists
