@@ -39,8 +39,7 @@ const MAX_PHONE_NUMBER_SIZE = 50;
 /// it maps a lowercase a-z character to a digit in 0-9.
 const charToDigit: [26]u8 = createDigitMap();
 const WordsDictionary = StringHashMap(ArrayList([]const u8));
-// Note: can I merge error unions? Would like to write this inline in the function...
-const PrintTranslationError = error{ DiskQuota, FileTooBig, InputOutput, NoSpaceLeft, AccessDenied, BrokenPipe, SystemResources, OperationAborted, NotOpenForWriting, WouldBlock, Unexpected, OutOfMemory };
+// Note: can I merge error unions? Would like to write this inline in the function... (answer: yes!)
 
 pub fn main() !void {
     // Allocator setup
@@ -114,8 +113,8 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
     // also, is it possible to flush on defer? Currently, I cannot do it, since it contains a try.
 }
 
-// Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness.
-// Note: is there no good way to abstract over writers?
+// Note: why must out be a ptr to a BufWriter? If not, it says that it violates const correctness. (ANS: because parameters are const)
+// Note: is there no good way to abstract over writers? (Ans: anytype, generics, etc)
 /// This function prints the encodings of the phone numbers recursively
 /// Here is an example input
 /// ```zig
@@ -131,7 +130,7 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
 /// Unfortunately, we have an edge case specified in the test instructions, whereby if no word matches at a given
 /// position, we are allowed to use a single digit (and no more!) in its place.
 /// The if-branch after the while statement handles this edge case.
-fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: anytype, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) PrintTranslationError!void {
+fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: anytype, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) (std.os.WriteError || error{OutOfMemory})!void {
     if (start >= digits.len) {
         // Base case, print everything inside of wordList and end recursion
         try out.print("{s}: ", .{number});
