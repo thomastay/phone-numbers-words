@@ -130,7 +130,15 @@ fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, wo
 /// Unfortunately, we have an edge case specified in the test instructions, whereby if no word matches at a given
 /// position, we are allowed to use a single digit (and no more!) in its place.
 /// The if-branch after the while statement handles this edge case.
-fn printTranslationImpl(wordList: *ArrayList([]const u8), start: usize, out: anytype, ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) (std.os.WriteError || error{OutOfMemory})!void {
+fn printTranslationImpl(
+    wordList: *ArrayList([]const u8),
+    start: usize,
+    out: anytype,
+    ally: *Allocator,
+    number: []const u8,
+    digits: []const u8,
+    words: WordsDictionary, // must have trailing slash so zigfmt doesn't try to put the parameters on one line
+) (std.os.WriteError || error{OutOfMemory})!void {
     if (start >= digits.len) {
         // Base case, print everything inside of wordList and end recursion
         try out.print("{s}: ", .{number});
