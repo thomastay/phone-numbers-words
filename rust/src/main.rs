@@ -1,17 +1,21 @@
-//! A Rust translation of [Norvig's Lisp as an alternative to Java](https://norvig.com/java-lisp.html)
+//! A Rust translation of [Norvig's Lisp as an alternative to Java](https://norvig.com/java-lisp.html).
 //! This is a fun little exercise that I use when learning a new language.
 //! I've done this previous excursion in Zig, Nim and Clojure and Python [Github link](https://github.com/thomastay/phone-numbers-words)
+//!
 //! The gist of this problem is as such: Given some mapping of letters to digits,
 //! we want to "translate" a phone number into a series of words that encode the phone number
 //! The words will be given to us via some dictionary.
-//! [The full instructions are here:](https://github.com/thomastay/phone-numbers-words/blob/master/resources/test_instructions.txt)
+//!
+//! [The full instructions are here](https://github.com/thomastay/phone-numbers-words/blob/master/resources/test_instructions.txt)
 //!
 //! For instance, given the mapping below, and a dictionary of words:
 //! MAPPING:
+//! ```
 //!       E | J N Q | R W X | D S Y | F T | A M | C I V | B K U | L O P | G H Z
 //!       e | j n q | r w x | d s y | f t | a m | c i v | b k u | l o p | g h z
 //!       0 |   1   |   2   |   3   |  4  |  5  |   6   |   7   |   8   |   9
-//! DICT: {hell, hello, o, world, row, oy}
+//! ```
+//! DICT: `{ hell, hello, o, world, row, oy }`
 //! we might encode the number 908-882-8283 in 4 different ways:
 //!    1. hello world
 //!    2. hell o world
@@ -61,7 +65,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         // for each phone number, print the translation.
         print_translation(&phone_num, &dict);
     }
-
     Ok(())
 }
 
@@ -94,7 +97,6 @@ fn print_translation(phone_number: &str, dict: &WordsDictionary) {
     ) {
         if start >= digits.len() {
             // Base case, print everything in word_list and end the recursion
-            // pretty print it for now
             print!("{}:", phone_number);
             for word in word_list {
                 print!(" {}", word);
@@ -110,13 +112,11 @@ fn print_translation(phone_number: &str, dict: &WordsDictionary) {
         // TODO make this slicing better, probably.
         for end in (start + 1)..=digits.len() {
             let key = &digits[start..end];
-            // println!("Searching for key {}", key);
             if let Some(words_mapped_to_digit) = dict.get(key) {
                 found_word = true;
                 for word in words_mapped_to_digit {
                     // Recurse. Push onto word_list before recursion, and pop after.
-                    // TODO remove this clone somehow
-                    word_list.push(word.to_string());
+                    word_list.push(String::from(word)); // TODO: can this clone be removed?
                     helper(word_list, end, phone_number, digits, dict);
                     let last = word_list.pop();
                     // Sanity check: upon reaching this point, the last elt of the vec should be the one
@@ -127,7 +127,7 @@ fn print_translation(phone_number: &str, dict: &WordsDictionary) {
         }
         if !found_word && is_empty_or_last_elt_is_not_single_digit(word_list) {
             let single_digit = (digits.as_bytes()[start] as char).to_string();
-
+            // Recurse. Push onto word_list before recursion, and pop after.
             word_list.push(single_digit);
             helper(word_list, start + 1, phone_number, digits, dict);
             let last = word_list.pop();
