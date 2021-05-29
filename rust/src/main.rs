@@ -1,50 +1,55 @@
+#![allow(missing_docs)] // don't publish a crate with this!
+#![allow(dead_code)] // don't publish a crate with this!
+#![deny(rust_2018_idioms)]
+#![deny(clippy::too_many_arguments)]
+#![deny(clippy::complexity)]
+#![deny(clippy::perf)]
+#![forbid(unsafe_code)]
+#![warn(clippy::style)]
+#![warn(clippy::pedantic)]
+
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::{char::MAX, collections::HashMap};
 
 const DIGIT_MAP: [u8; 26] = [
     53, 55, 54, 51, 48, 52, 57, 57, 54, 49, 55, 56, 53, 49, 56, 56, 49, 50, 51, 52, 55, 54, 50, 50,
     51, 57,
 ]; // auto gen-ed for now. See Zig code for how it is autogen'd
 
-fn main() -> Result<(), io::Error> {
+fn main() {
     let dict = {
         let dict_filename = "../resources/dictionary_small.txt";
         let dict_path = Path::new(dict_filename);
-        let dict_file = File::open(dict_path)?;
+        let dict_file = File::open(dict_path)
+            .unwrap_or_else(|_| panic!("Unable to open dictionary at {}", dict_filename));
         let mut dict: HashMap<String, Vec<String>> = HashMap::new();
         for line in BufReader::new(dict_file).lines() {
-            // println!("{:?}", line.unwrap());
             let line = line.expect("line should be nonempty");
-            let digits = word_to_num(&line.as_bytes());
-            match dict.get_mut(&digits) {
-                Some(v) => v.push(line),
-                None => {
-                    let v = vec![line];
-                    dict.insert(digits, v);
-                }
+            let digits = word_to_num(&line);
+            if let Some(v) = dict.get_mut(&digits) {
+                v.push(line)
+            } else {
+                let v = vec![line];
+                dict.insert(digits, v);
             }
         }
         dict
     };
     println!("{:?}", dict);
     // let phone_num_filename = "../resources/input_small.txt";
-    Ok(())
 }
 
-fn word_to_num(word: &[u8]) -> String {
-    word.iter()
-        .filter(|c| c.is_ascii_alphabetic())
+fn word_to_num(word: &str) -> String {
+    word.bytes()
+        .filter(u8::is_ascii_alphabetic)
         .map(|c| DIGIT_MAP[(c.to_ascii_lowercase() - b'a') as usize] as char)
         .collect()
 }
 
-fn only_digits(word: &[u8]) -> String {
-    word.iter()
-        .filter(|c| c.is_ascii_digit())
-        .map(|c| *c as char)
-        .collect()
+fn only_digits(word: &str) -> String {
+    word.chars().filter(char::is_ascii_digit).collect()
 }
 
 /*
