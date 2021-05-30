@@ -88,12 +88,12 @@ fn read_dict_from_file(dict_filename: &str) -> Result<WordsDictionary, Box<dyn E
 /// prints the phone number and all combinations of words that might encode the phone number.
 fn print_translation(phone_number: &str, dict: &WordsDictionary) {
     // helper function that does the real work recursively
-    fn helper(
-        word_list: &mut Vec<String>,
+    fn helper<'d>(
+        word_list: &mut Vec<&'d str>,
         start: usize,
         phone_number: &str,
-        digits: &str,
-        dict: &WordsDictionary,
+        digits: &'d str,
+        dict: &'d WordsDictionary,
     ) {
         if start >= digits.len() {
             // Base case, print everything in word_list and end the recursion
@@ -116,24 +116,24 @@ fn print_translation(phone_number: &str, dict: &WordsDictionary) {
                 found_word = true;
                 for word in words_mapped_to_digit {
                     // Recurse. Push onto word_list before recursion, and pop after.
-                    word_list.push(String::from(word)); // TODO: can this clone be removed?
+                    word_list.push(word);
                     helper(word_list, end, phone_number, digits, dict);
                     let last = word_list.pop();
                     // Sanity check: upon reaching this point, the last elt of the vec should be the one
                     // we just pushed on.
-                    debug_assert_eq!(last, Some(word.to_string()));
+                    debug_assert_eq!(last, Some(String::as_str(word)));
                 }
             }
         }
         if !found_word && is_empty_or_last_elt_is_not_single_digit(word_list) {
-            let single_digit = (digits.as_bytes()[start] as char).to_string();
+            let single_digit = &digits[start..=start];
             // Recurse. Push onto word_list before recursion, and pop after.
             word_list.push(single_digit);
             helper(word_list, start + 1, phone_number, digits, dict);
             let last = word_list.pop();
             // Sanity check: upon reaching this point, the last elt of the vec should be the one
             // we just pushed on.
-            debug_assert_eq!(last, Some((digits.as_bytes()[start] as char).to_string()));
+            debug_assert_eq!(last, Some(&digits[start..=start]));
         }
     }
 
@@ -142,7 +142,7 @@ fn print_translation(phone_number: &str, dict: &WordsDictionary) {
     helper(&mut word_list, 0, phone_number, &digits, dict);
 }
 
-fn is_empty_or_last_elt_is_not_single_digit(v: &[String]) -> bool {
+fn is_empty_or_last_elt_is_not_single_digit(v: &[&str]) -> bool {
     v.last().map_or(true, |s| s.len() != 1)
 }
 
