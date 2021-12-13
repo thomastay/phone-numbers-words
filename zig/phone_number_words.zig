@@ -46,7 +46,7 @@ pub fn main() !void {
     // Note: GPA is great for debugging, works like it says on the tin and catches all leaks.
     // but how do I swap it out at build time, based on the build config?
     var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // Note: why the {}? I learnt this through copy-paste
-    var gpaAlly = &gpa.allocator;
+    var gpaAlly = gpa.allocator();
     defer std.debug.assert(!gpa.deinit()); // no leaks
 
     const argv = try std.process.argsAlloc(gpaAlly);
@@ -65,7 +65,7 @@ pub fn main() !void {
         var dictFile = try fs.Dir.openFile(fs.cwd(), dictFilename, .{});
         defer dictFile.close();
         var dictReader = std.io.bufferedReader(fs.File.reader(dictFile)).reader();
-        break :blk try readDictionary(&dictArena.allocator, &dictReader);
+        break :blk try readDictionary(dictArena.allocator(), &dictReader);
     };
 
     // Read the phone numbers from a file, and print the translations.
@@ -81,7 +81,7 @@ pub fn main() !void {
 
 /// Reads a dictionary from the given Reader (declared anytype to be generic)
 /// Returns a hashmap from str -> ArrayList
-fn readDictionary(ally: *Allocator, rdr: anytype) !WordsDictionary {
+fn readDictionary(ally: Allocator, rdr: anytype) !WordsDictionary {
     var words = WordsDictionary.init(ally);
     var wordToStrBuf: [MAX_DICT_WORD_SIZE]u8 = undefined;
     while (try readUntilEolOrEofAlloc(rdr, ally, MAX_DICT_WORD_SIZE)) |dictWord| {
@@ -89,12 +89,12 @@ fn readDictionary(ally: *Allocator, rdr: anytype) !WordsDictionary {
 
         const ret = try words.getOrPut(digits);
         if (ret.found_existing) {
-            try ret.entry.value.append(dictWord);
+            try ret.value_ptr.append(dictWord);
         } else {
             var vec = try ArrayList([]const u8).initCapacity(ally, 1);
             try vec.append(dictWord); // Note: can I declare this inline with the previous line?
-            ret.entry.key = try ally.dupe(u8, digits);
-            ret.entry.value = vec;
+            ret.key_ptr.* = try ally.dupe(u8, digits);
+            ret.value_ptr.* = vec;
         }
     }
     return words;
@@ -103,12 +103,13 @@ fn readDictionary(ally: *Allocator, rdr: anytype) !WordsDictionary {
 /// For a given phone number and a the digits of the phone number
 /// prints the phone number and all combinations of words that might encode the phone number
 /// It sets up some allocators and variables, then calls printTranslationImpl, which is a recursive function.
-fn printTranslation(ally: *Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) !void {
+fn printTranslation(ally: Allocator, number: []const u8, digits: []const u8, words: WordsDictionary) !void {
     var arena = ArenaAllocator.init(ally);
+    var allocator = arena.allocator();
     defer arena.deinit();
-    var wordList = try ArrayList([]const u8).initCapacity(&arena.allocator, digits.len);
+    var wordList = try ArrayList([]const u8).initCapacity(allocator, digits.len);
     var bufWriter = std.io.bufferedWriter(std.io.getStdOut().writer());
-    try printTranslationImpl(&wordList, 0, &bufWriter.writer(), &arena.allocator, number, digits, words);
+    try printTranslationImpl(&wordList, 0, &bufWriter.writer(), allocator, number, digits, words);
     try bufWriter.flush(); // Note: why is this needed? Should I flush later? When do I flush?
     // also, is it possible to flush on defer? Currently, I cannot do it, since it contains a try.
 }
@@ -134,7 +135,7 @@ fn printTranslationImpl(
     wordList: *ArrayList([]const u8),
     start: usize,
     out: anytype,
-    ally: *Allocator,
+    ally: Allocator,
     number: []const u8,
     digits: []const u8,
     words: WordsDictionary, // must have trailing slash so zigfmt doesn't try to put the parameters on one line
@@ -218,7 +219,7 @@ fn wordToNumber(word: []const u8, output: []u8) []u8 {
 
     // i points to word, j points to output
     var j: usize = 0;
-    for (word) |c, i| {
+    for (word) |c| {
         if (std.ascii.isAlpha(c)) {
             output[j] = charToDigit[std.ascii.toLower(c) - 'a'];
             j += 1;
@@ -234,7 +235,7 @@ fn onlyDigits(word: []const u8, output: []u8) []u8 {
 
     // i points to word, j points to output
     var j: usize = 0;
-    for (word) |c, i| {
+    for (word) |c| {
         if (std.ascii.isDigit(c)) {
             output[j] = c;
             j += 1;
@@ -247,15 +248,15 @@ fn onlyDigits(word: []const u8, output: []u8) []u8 {
 // --------------------------------------------------------------------------------------
 
 // These functions are to handle the inability of the stdlib to handle CRLF line endings
-fn readUntilEolOrEofAlloc(self: anytype, allocator: *Allocator, max_size: usize) !?[]u8 {
-    if (builtin.os.tag == builtin.Os.Tag.windows) {
+fn readUntilEolOrEofAlloc(self: anytype, allocator: Allocator, max_size: usize) !?[]u8 {
+    if (builtin.os.tag == .windows) {
         return readUntilCRLFOrEofAlloc(self, allocator, max_size);
     } else {
         return self.readUntilDelimiterOrEofAlloc(allocator, '\n', max_size);
     }
 }
 
-fn readUntilCRLFOrEofAlloc(self: anytype, allocator: *Allocator, max_size: usize) !?[]u8 {
+fn readUntilCRLFOrEofAlloc(self: anytype, allocator: Allocator, max_size: usize) !?[]u8 {
     const result_ = try self.readUntilDelimiterOrEofAlloc(allocator, '\r', max_size);
     if (result_) |result| {
         errdefer allocator.free(result);
@@ -281,7 +282,7 @@ fn readUntilCRLFOrEofAlloc(self: anytype, allocator: *Allocator, max_size: usize
 
 // These functions are to handle the inability of the stdlib to handle CRLF line endings
 fn readUntilEolOrEof(self: anytype, buf: []u8) !?[]u8 {
-    if (builtin.os.tag == builtin.Os.Tag.windows) {
+    if (builtin.os.tag == .windows) {
         return readUntilCRLFOrEof(self, buf);
     } else {
         return self.readUntilDelimiterOrEof(buf, '\n');
